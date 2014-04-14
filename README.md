@@ -3,146 +3,85 @@ Apache+PHP build pack
 
 This is a build pack bundling PHP and Apache for Heroku apps.
 
+**Features:**
+* PHP 5.5.11 (PHP-FPM)
+* Apache HTTP Server 2.4.9
+* Composer Support
+* Opcache Enabled
+* PECL Memcached
+* GD support
+* igbinary support
+* mcrypt support (to support Laravel 4)
+* PostgreSQL support
+* MongoDB support
+
 Configuration
 -------------
 
-The config files are bundled with the build pack itself:
+The config files are bundled with the buildpack itself:
 
 * conf/httpd.conf
 * conf/php.ini
 
+Configure Heroku to use this buildpack repo AND branch
+
+    $ heroku config:set BUILDPACK_URL=git://github.com/winglian/heroku-buildpack-php.git#mpm-event-php55-fpm
+
+This buildpack also supports custom Document Roots in your application. Simply add an environment variable. If your document root is public in the root of your repo, then run
+    
+    $ heroku config:set WWWROOT=/public
+
+Composer
+--------
+
+Composer support is built in. Simpy drop your composer.json into the root of your repository the buildpack will automatically install the requirements and dependencies into the dyno. Because composer dependencies are saved in the dyno, when you scale up, all the dynos are ensured to be identical. Please be aware that if for example github is down when you push to heroku, that the composer install will fail and you will have a broken dyno and you should roll-back.
+
+Composer Private Repository Support
+-----------------------------------
+
+This buildpack now supports private repositories. You should create a new ssh keypair, which you should tar and then AES encrypt and make publicly available. You can either store the encrypted bundle on S3 or a publicly available git repo that allows public access the raw contents. See <http://getcomposer.org/doc/05-repositories.md#using-private-repositories> for information on how to setup private repositories in your composer.json.
+
+    $ export SSH_BUNDLE_PASSWORD="Y0urSup3rS3cretP@ssw0rd"
+    $ heroku config:set SSH_BUNDLE_PASSWORD={$SSH_BUNDLE_PASSWORD}
+    $ cd /tmp
+    $ ssh-keygen -t rsa -b 2048
+    Generating public/private rsa key pair.
+    Enter file in which to save the key (~/.ssh/id_rsa): /tmp/.ssh/id_rsa
+    Enter passphrase (empty for no passphrase): 
+    Enter same passphrase again: 
+    Your identification has been saved in /tmp/.ssh/id_rsa.
+    Your public key has been saved in /tmp/.ssh/id_rsa.pub.
+    $ cat << 'EOF' > /tmp/.ssh/config
+    StrictHostKeyChecking no
+    UserKnownHostsFile=/dev/null
+    EOF
+    $ tar -czv .ssh | openssl enc -out ssh_bundle_enc -e -k $SSH_BUNDLE_PASSWORD -aes-128-cbc
+
+You will then need to upload ssh_bundle_enc to either S3 or save to a public git repo and allow authentication with /tmp/.ssh/id_rsa.pub to your private repository
+
+    $ cd -
+    $ heroku config:set SSH_BUNDLE_URL="http://s3.amazonaws.com/bucket/{path to folder containing ssh_bundle_enc}/ssh_bundle_enc"
+    $ heroku labs:enable user-env-compile
+
+
+Hacking with shell scripts
+--------------------------
+
+This buildpack includes several hooks allowing you to add custom behavior when the dyno is compiled as well as when a dyno is spun up. By adding a .heroku/compile.sh script into the root of your repository (not the buildpack's repository), you can add additional hooks such as uploading static assets to your CDN, building the cache, etc. The .heroku/compile.sh file will be deleted before the dyno is saved and any other shell scripts in the .heroku directory will be executed when the dyno is spun up.
 
 Pre-compiling binaries
 ----------------------
 
-On a Heroku Dyno, one can run the following as executable text.  After
-running it, `/app` will contain, among other entities,
-`apache-2.2.25-2.tar.gz`, `php-5.3.27-2.tar.gz`, and
-`mcrypt-2.5.8-2.tar.gz` which should be uploaded to a location that
-can be downloaded by the build pack (see the URIs in `compile`).
+After building the binary below, update the OPT_BUILDPACK_URL variable in bin/compile to point to the url of the vulcan binary from Heroku
 
-    #!/bin/bash
-    set -uex
-    cd /tmp
-
-    # Heroku revision.  Must match in 'compile' program.
-    #
-    # Affixed to all vendored binary output to represent changes to the
-    # compilation environment without a change to the upstream version,
-    # e.g. PHP 5.3.27 without, and then subsequently with, libmcrypt.
-    heroku_rev='-2'
-
-    # Clear /app directory
-    find /app -mindepth 1 -print0 | xargs -0 rm -rf
-
-    # Take care of vendoring libmcrypt
-    mcrypt_version=2.5.8
-    mcrypt_dirname=libmcrypt-$mcrypt_version
-    mcrypt_archive_name=$mcrypt_dirname.tar.bz2
-
-    # Download mcrypt if necessary
-    if [ ! -f mcrypt_archive_name ]
-    then
-        curl -Lo $mcrypt_archive_name http://sourceforge.net/projects/mcrypt/files/Libmcrypt/2.5.8/libmcrypt-2.5.8.tar.bz2/download
-    fi
-
-    # Clean and extract mcrypt
-    rm -rf $mcrypt_dirname
-    tar jxf $mcrypt_archive_name
-
-    # Build and install mcrypt.
-    pushd $mcrypt_dirname
-    ./configure --prefix=/app/vendor/mcrypt \
-      --disable-posix-threads --enable-dynamic-loading
-    make -s
-    make install -s
-    popd
-
-    # Take care of vendoring Apache.
-    httpd_version=2.2.25
-    httpd_dirname=httpd-$httpd_version
-    httpd_archive_name=$httpd_dirname.tar.bz2
-
-    # Download Apache if necessary.
-    if [ ! -f $httpd_archive_name ]
-    then
-        curl -LO ftp://ftp.osuosl.org/pub/apache//httpd/$httpd_archive_name
-    fi
-
-    # Clean and extract Apache.
-    rm -rf $httpd_dirname
-    tar jxf $httpd_archive_name
-
-    # Build and install Apache.
-    pushd $httpd_dirname
-    ./configure --prefix=/app/apache --enable-rewrite --with-included-apr
-    make -s
-    make install -s
-    popd
-
-    # Take care of vendoring PHP.
-    php_version=5.3.27
-    php_dirname=php-$php_version
-    php_archive_name=$php_dirname.tar.bz2
-
-    # Download PHP if necessary.
-    if [ ! -f $php_archive_name ]
-    then
-        curl -Lo $php_archive_name http://us1.php.net/get/php-5.3.27.tar.bz2/from/www.php.net/mirror
-    fi
-
-    # Clean and extract PHP.
-    rm -rf $php_dirname
-    tar jxf $php_archive_name
-
-    # Compile PHP
-    pushd $php_dirname
-    ./configure --prefix=/app/php --with-apxs2=/app/apache/bin/apxs     \
-    --with-mysql --with-pdo-mysql --with-pgsql --with-pdo-pgsql         \
-    --with-iconv --with-gd --with-curl=/usr/lib                         \
-    --with-config-file-path=/app/php --enable-soap=shared               \
-    --with-openssl --with-mcrypt=/app/vendor/mcrypt --enable-sockets
-    make -s
-    make install -s
-    popd
-
-    # Copy in MySQL client library.
-    mkdir -p /app/php/lib/php
-    cp /usr/lib/libmysqlclient.so.16 /app/php/lib/php
-
-    # 'apc' installation
-    #
-    # $PATH manipulation Necessary for 'pecl install', which relies on
-    # PHP binaries relative to $PATH.
-
-    export PATH=/app/php/bin:$PATH
-    /app/php/bin/pecl channel-update pecl.php.net
-
-    # Use defaults for apc build prompts.
-    yes '' | /app/php/bin/pecl install apc
-
-    # Sanitize default cgi-bin to rid oneself of Apache sample
-    # programs.
-    find /app/apache/cgi-bin/ -mindepth 1 -print0 | xargs -0 rm -r
-
-    # Stamp and archive binaries.
-    pushd /app
-    echo $mcrypt_version > vendor/mcrypt/VERSION
-    tar -zcf mcrypt-"$mcrypt_version""$heroku_rev".tar.gz vendor/mcrypt
-    echo $httpd_version > apache/VERSION
-    tar -zcf apache-"$httpd_version""$heroku_rev".tar.gz apache
-    echo $php_version > php/VERSION
-    tar -zcf php-"$php_version""$heroku_rev".tar.gz php
-    popd
+    $ vulcan build -v -s ./build -p /tmp/build -c "./vulcan.sh"
 
 Hacking
 -------
 
 To change this buildpack, fork it on Github. Push up changes to your fork, then create a test app with --buildpack <your-github-url> and push to it.
 
-
 Meta
 ----
 
-Created by Pedro Belo.
-Many thanks to Keith Rarick for the help with assorted Unix topics :)
+Original buildpack by Pedro Belo. https://github.com/heroku/heroku-buildpack-php
