@@ -1,7 +1,7 @@
 Apache+PHP build pack
 ========================
 
-This is a build pack bundling PHP and Apache for Heroku apps.
+This is a build pack bundling PHP and Apache for Heroku apps. 
 
 **Features:**
 * PHP 5.5.11 (PHP-FPM)
@@ -85,3 +85,5 @@ Meta
 ----
 
 Original buildpack by Pedro Belo. https://github.com/heroku/heroku-buildpack-php
+
+I originally forked this from https://github.com/heroku/heroku-buildpack-php in order to make a small change, then realized I really needed to use winglian's fork of this buildpack from https://github.com/winglian/heroku-buildpack-php. I merged the branch mpm-event-php55-fpm into my initial fork. The only difference between this currently and winglian's branch is that I added the ability to specify an htaccess file in httpd.conf with a heroku config var, thanks to digitalpulp for this idea.  
